@@ -4,7 +4,7 @@ import pathlib
 from typing import List, Dict, Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -117,11 +117,57 @@ if WEB_DIR.exists():
 
 
 @app.get("/")
-def root_page():
-    index_path = WEB_DIR / "index.html"
-    if index_path.exists():
-        return FileResponse(str(index_path))
-    return HTMLResponse("<h1>Wayne Winton Chatbot API</h1><p>Frontend missing.</p>")
+def root_page(request: Request):
+        # Require a simple login cookie before serving the frontend index
+        if request.cookies.get("logged_in") != "1":
+                # Not logged in -> redirect to login page
+                return RedirectResponse(url="/login")
+
+        index_path = WEB_DIR / "index.html"
+        if index_path.exists():
+                return FileResponse(str(index_path))
+        return HTMLResponse("<h1>Wayne Winton Chatbot API</h1><p>Frontend missing.</p>")
+
+
+_LOGIN_HTML = """
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Login</title>
+        <style>body{font-family:Arial,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#f6f7fb}form{background:#fff;padding:24px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.08)}input{display:block;margin:8px 0;padding:8px;width:280px}</style>
+    </head>
+    <body>
+        <form method="post" action="/login">
+            <h2>Login</h2>
+            <label>Password</label>
+            <input name="password" type="password" placeholder="Enter password" autofocus />
+            <button type="submit">Log in</button>
+        </form>
+    </body>
+</html>
+"""
+
+
+@app.get("/login")
+def login_page(request: Request):
+        return HTMLResponse(_LOGIN_HTML)
+
+
+@app.post("/login")
+async def login(request: Request):
+        form = await request.form()
+        password = form.get("password", "")
+        admin_pw = os.getenv("ADMIN_PASSWORD", "password")
+        if password == admin_pw:
+                # Success: set a simple cookie and redirect to root
+                resp = RedirectResponse(url="/", status_code=303)
+                resp.set_cookie("logged_in", "1", httponly=True, max_age=3600)
+                return resp
+
+        # Failure: show form again with a small error
+        html = _LOGIN_HTML.replace("</form>", "<p style='color:red'>Invalid password</p></form>")
+        return HTMLResponse(html, status_code=401)
 
 
 def _avatar_path() -> pathlib.Path | None:
